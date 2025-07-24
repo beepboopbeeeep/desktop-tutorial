@@ -1,0 +1,42 @@
+<input id="domain" placeholder="مثلاً: speed.cloudflare.com" />
+<button onclick="testDomain()">تست آی‌پی</button>
+<pre id="result">در انتظار ورودی...</pre>
+
+<script>
+  async function testDomain() {
+    const dom = document.getElementById("domain").value.trim();
+    if (!dom) return;
+
+    document.getElementById("result").textContent = "در حال دریافت آی‌پی از DNS...";
+
+    const dnsURL = `https://cloudflare-dns.com/dns-query?name=${dom}&type=A`;
+    try {
+      const dnsRes = await fetch(dnsURL, { headers: { accept: "application/dns-json" } });
+      const dnsJson = await dnsRes.json();
+      const ips = dnsJson.Answer?.filter(r => r.type === 1).map(r => r.data) || [];
+
+      if (ips.length === 0) {
+        document.getElementById("result").textContent = "⛔ آی‌پی یافت نشد.";
+        return;
+      }
+
+      let resultText = `🌐 دامنه: ${dom}\n🔍 آی‌پی‌های پاسخگو:\n`;
+
+      for (const ip of ips) {
+        const url = `https://${ip}/cdn-cgi/trace`;
+        const start = performance.now();
+        try {
+          const pingRes = await fetch(url, { method: "GET", mode: "no-cors" });
+          const latency = Math.round(performance.now() - start);
+          resultText += `✅ ${ip} - latency ~ ${latency} ms\n`;
+        } catch {
+          resultText += `❌ ${ip} - پاسخ نداد\n`;
+        }
+      }
+
+      document.getElementById("result").textContent = resultText;
+    } catch (err) {
+      document.getElementById("result").textContent = "❌ خطا در دریافت DNS یا تست آی‌پی.";
+    }
+  }
+</script>
