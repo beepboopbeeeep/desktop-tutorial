@@ -1,42 +1,38 @@
-<input id="domain" placeholder="مثلاً: speed.cloudflare.com" />
-<button onclick="testDomain()">تست آی‌پی</button>
-<pre id="result">در انتظار ورودی...</pre>
+<input id="domain" placeholder="دامنه‌ای مثل example.com" />
+<button onclick="testIP()">تست آی‌پی نود کلادفلر</button>
+<pre id="output">در انتظار...</pre>
 
 <script>
-  async function testDomain() {
+  async function testIP() {
     const dom = document.getElementById("domain").value.trim();
-    if (!dom) return;
+    const proxyURL = `https://cfipscanner.nedorir.workers.dev/?domain=${dom}`;
+    document.getElementById("output").textContent = "🔍 در حال دریافت آی‌پی...";
 
-    document.getElementById("result").textContent = "در حال دریافت آی‌پی از DNS...";
-
-    const dnsURL = `https://cloudflare-dns.com/dns-query?name=${dom}&type=A`;
     try {
-      const dnsRes = await fetch(dnsURL, { headers: { accept: "application/dns-json" } });
-      const dnsJson = await dnsRes.json();
-      const ips = dnsJson.Answer?.filter(r => r.type === 1).map(r => r.data) || [];
+      const res = await fetch(proxyURL);
+      const data = await res.json();
+      const ips = data.Answer?.filter(r => r.type === 1).map(r => r.data) || [];
 
-      if (ips.length === 0) {
-        document.getElementById("result").textContent = "⛔ آی‌پی یافت نشد.";
+      if (!ips.length) {
+        document.getElementById("output").textContent = "⛔ آی‌پی کلادفلری یافت نشد.";
         return;
       }
 
-      let resultText = `🌐 دامنه: ${dom}\n🔍 آی‌پی‌های پاسخگو:\n`;
-
+      let result = `🌐 دامنه: ${dom}\n`;
       for (const ip of ips) {
-        const url = `https://${ip}/cdn-cgi/trace`;
         const start = performance.now();
         try {
-          const pingRes = await fetch(url, { method: "GET", mode: "no-cors" });
+          await fetch(`https://${ip}/cdn-cgi/trace`, { mode: "no-cors" });
           const latency = Math.round(performance.now() - start);
-          resultText += `✅ ${ip} - latency ~ ${latency} ms\n`;
+          result += `✅ آی‌پی ${ip} - latency تقریبی: ${latency} ms\n`;
         } catch {
-          resultText += `❌ ${ip} - پاسخ نداد\n`;
+          result += `❌ آی‌پی ${ip} - پاسخ نداد\n`;
         }
       }
 
-      document.getElementById("result").textContent = resultText;
+      document.getElementById("output").textContent = result;
     } catch (err) {
-      document.getElementById("result").textContent = "❌ خطا در دریافت DNS یا تست آی‌پی.";
+      document.getElementById("output").textContent = "❌ خطا در دریافت یا تست آی‌پی.";
     }
   }
 </script>
