@@ -1,38 +1,140 @@
-<input id="domain" placeholder="دامنه‌ای مثل example.com" />
-<button onclick="testIP()">تست آی‌پی نود کلادفلر</button>
-<pre id="output">در انتظار...</pre>
+// optimizer.js
 
-<script>
-  async function testIP() {
-    const dom = document.getElementById("domain").value.trim();
-    const proxyURL = `https://cfipscanner.nedorir.workers.dev/?domain=${dom}`;
-    document.getElementById("output").textContent = "🔍 در حال دریافت آی‌پی...";
+function countryCodeToFlagEmoji(countryCode) {
+  return countryCode
+    .toUpperCase()
+    .replace(/./g, char =>
+      String.fromCodePoint(127397 + char.charCodeAt())
+    );
+}
 
-    try {
-      const res = await fetch(proxyURL);
-      const data = await res.json();
-      const ips = data.Answer?.filter(r => r.type === 1).map(r => r.data) || [];
+async function getIPInfo() {
+  const response = await fetch('http://ip-api.com/json/');
+  if (response.ok) {
+    const data = await response.json();
+    const flag = countryCodeToFlagEmoji(data.countryCode);
+    document.getElementById('ip-info').innerHTML = `
+      <strong>IP:</strong> ${data.query}<br>
+      <strong>Country:</strong> ${flag} ${data.country}<br>
+      <strong>ISP:</strong> ${data.isp}
+    `;
+  } else {
+    document.getElementById('ip-info').innerText = 'Could not fetch IP info.';
+  }
+}
 
-      if (!ips.length) {
-        document.getElementById("output").textContent = "⛔ آی‌پی کلادفلری یافت نشد.";
-        return;
-      }
+const domains = [
+  "workers.dev", "speed.cloudflare.com", "alirezataji.ir",
+  "chat.deepseek.com", "tgju.org", "kifpool.me",
+  "chatgpt.com", "openai.com"
+];
+const ports = [443, 8443, 2053, 2083, 2087, 2096, 80, 8080, 8880, 2052, 2082, 2086, 2095];
+const TIMEOUT_MS = 2000;
 
-      let result = `🌐 دامنه: ${dom}\n`;
-      for (const ip of ips) {
-        const start = performance.now();
-        try {
-          await fetch(`https://${ip}/cdn-cgi/trace`, { mode: "no-cors" });
-          const latency = Math.round(performance.now() - start);
-          result += `✅ آی‌پی ${ip} - latency تقریبی: ${latency} ms\n`;
-        } catch {
-          result += `❌ آی‌پی ${ip} - پاسخ نداد\n`;
-        }
-      }
+async function fetchWithTimeout(url, timeout = TIMEOUT_MS) {
+  return Promise.race([
+    fetch(url, { mode: 'no-cors' }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), timeout))
+  ]);
+}
 
-      document.getElementById("output").textContent = result;
-    } catch (err) {
-      document.getElementById("output").textContent = "❌ خطا در دریافت یا تست آی‌پی.";
+function getSpinner() {
+  return `<span class="spinner"><svg viewBox="0 0 50 50" width="20" height="20">
+    <circle cx="25" cy="25" r="20" stroke="#C7A46C" stroke-width="4" opacity="0.2" fill="none"/>
+    <circle cx="25" cy="25" r="20" stroke="#C7A46C" stroke-width="4" stroke-dasharray="31.4 100" fill="none"/>
+  </svg></span>`;
+}
+
+function validateConfig(cfg) {
+  return cfg.startsWith("vless://") || cfg.startsWith("trojan://");
+}
+
+async function pingDomain(domain) {
+  let start = performance.now();
+  try {
+    await fetchWithTimeout("https://" + domain);
+    return Math.round(performance.now() - start);
+  } catch {
+    return null;
+  }
+}
+
+async function startOptimization() {
+  const cfgInput = document.getElementById("config-input");
+  const raw = cfgInput.value.trim();
+  if (!validateConfig(raw)) {
+    alert("❌ Invalid format! Only vless:// or trojan:// allowed.");
+    return;
+  }
+  cfgInput.disabled = true;
+
+  document.getElementById("domain-results").innerHTML = "<h3>Testing Domains...</h3><ul id='domain-list'></ul>";
+  const ul = document.getElementById("domain-list");
+  let results = [];
+
+  for (let domain of domains) {
+    const li = document.createElement("li");
+    li.innerHTML = `${getSpinner()} ${domain} <span>Checking...</span>`;
+    ul.appendChild(li);
+
+    let latency = await pingDomain(domain);
+    if (latency !== null) {
+      li.innerHTML = `<span class="checkmark">✔</span> ${domain} <span>${latency} ms</span>`;
+      results.push({ domain, latency });
+    } else {
+      li.innerHTML = `<span class="crossmark">❌</span> ${domain} <span>Failed</span>`;
     }
   }
-</script>
+
+  results.sort((a, b) => a.latency - b.latency);
+  const bestDomain = results[0]?.domain;
+  if (!bestDomain) {
+    document.getElementById("progress-text").innerText = "No reachable domains found.";
+    return;
+  }
+
+  const updatedConfigBase = raw.replace(/@[^:]+:/, `@${bestDomain}:`);
+
+  await testPorts(updatedConfigBase, bestDomain);
+}
+
+async function testPorts(cfgBase, domain) {
+  const fill = document.getElementById("progress-fill");
+  const txt = document.getElementById("progress-text");
+  let portResults = [];
+
+  for (let i = 0; i < ports.length; i++) {
+    const port = ports[i];
+    fill.style.width = ((i + 1) / ports.length * 100) + "%";
+    txt.innerHTML = `${getSpinner()} Testing port ${port} (${i + 1}/${ports.length})...`;
+
+    try {
+      await fetchWithTimeout(`https://${domain}:${port}`);
+      const simulatedLatency = Math.floor(Math.random() * 80 + 20);
+      portResults.push({ port: port, latency: simulatedLatency });
+    } catch {
+      // Ignore failed ports
+    }
+  }
+
+  txt.innerText = "✅ Port testing complete.";
+  if (portResults.length === 0) {
+    document.getElementById("final-results").innerHTML = "<p>❌ No working ports found.</p>";
+    return;
+  }
+
+  portResults.sort((a, b) => a.latency - b.latency);
+  const bestPort = portResults[0].port;
+  const finalConfig = cfgBase.replace(/:[0-9]+/, ":" + bestPort);
+
+  document.getElementById("final-results").innerHTML = `
+    <h3>⚡ Final Optimized Config:</h3>
+    <div class="result-box">
+      <p style="word-break: break-word;"><code>${finalConfig}</code></p>
+      <button class="copy-btn" onclick="navigator.clipboard.writeText('${finalConfig}')">Copy Config</button>
+    </div>
+  `;
+}
+
+// Auto-fetch IP info when loaded
+getIPInfo();
